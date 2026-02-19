@@ -1,0 +1,162 @@
+---
+title: Metrics
+description: How Seer computes Recall, Precision, F1, and nDCG
+---
+
+Seer turns unlabeled retrieval traffic into actionable quality signals. This page defines each metric, how we compute it, and how to read it in the app.
+
+> New here? First see [Context & Event schema](/context-and-event-schema) to understand the input shapes Seer consumes.
+
+---
+
+## Overview
+
+For each logged retrieval event, Seer:
+1. Uses an evaluator model to enumerate the minimal disjoint requirements needed to answer the query (we call this number K).
+2. Judges which requirements are supported by the retrieved `context` you sent.
+3. Produces Recall, a Precision proxy, and derived scores (F1, nDCG).
+
+These metrics are designed to be:
+- Model-agnostic (work with any retriever/search stack).
+- Label-free (computed without ground-truth annotations).
+- Ops-friendly (good default thresholds, alertable, SLO-able).
+
+---
+
+## Evaluator-defined Recall
+
+**What it measures:** "Did my context include everything needed to answer?"
+
+**Definition**
+- The evaluator lists requirements: `r1..rK`.
+- For each requirement `ri`, it marks it **present** if at least one passage in your `context` supports it.
+- **Recall** is:
+
+```
+recall = (# of requirements marked present) / K
+```
+
+**Interpretation**
+- `1.0` ⇒ every requirement was supported by your retrieved context.
+- `< 1.0` ⇒ at least one needed requirement was missing (Seer flags these).
+
+**Notes**
+- K varies by query. Single-hop questions tend to have smaller K; multi-hop and compositional queries have larger K.
+- Your `context` can be either `string[]` or `{ text, ... }[]`. If object shape is used, evaluator relies on the `text` field.
+
+---
+
+## Precision (proxy for context bloat)
+
+**What it measures:** "How much of my context actually helped?"
+
+Because there's no gold set of "all relevant documents," we use a **proxy precision**:
+
+```
+precision = (# of unique documents the evaluator cites as supporting any requirement) / (total # of documents in context)
+```
+
+- If your `context` is large but the evaluator only cites a couple items, precision will be low. This signals context bloat.
+- If you provide ranks or scores on each context item (e.g., `rank`, `score`), they help downstream metrics like nDCG.
+
+> We will introduce citation precision (based on downstream answer citation) later; the above is retrieval-only.
+
+---
+
+## F1 (derived)
+
+We derive F1 from **Recall** and the **Precision proxy**:
+```
+f1 = 2 * (precision * recall) / (precision + recall)
+```
+- Behaves as expected: penalizes if either recall or precision is poor.
+
+---
+
+## nDCG (optional ranks/scores)
+
+If your `context` items include **rank** (1 = top) or a **score**, Seer computes an **nDCG-style** score using the evaluator's "supporting/not" signal as graded relevance.
+
+High-level:
+- Relevance: 1 for "supporting", 0 for "not supporting" (or a small fractional value if we add soft support later).
+- DCG is computed over your ranked list; IDCG is the ideal ordering (all supporting first).
+- `nDCG = DCG / IDCG` in `[0,1]`.
+
+> If you don't provide ranks/scores, we still compute recall/precision/F1. nDCG appears when ranking data is present.
+
+---
+
+## Worked example
+
+**Input (your log)**
+
+```json
+{
+  "task": "Who directed Inception and what is their nationality?",
+  "context": [
+    {"id": "p1", "text": "Christopher Nolan directed Inception.", "score": 0.95},
+    {"id": "p2", "text": "Nolan is British-American.", "score": 0.89},
+    {"id": "p3", "text": "Inception released in 2010.", "score": 0.72}
+  ],
+  "metadata": {
+    "env": "prod",
+    "feature_flag": "retrieval-v2"
+  }
+}
+```
+
+**Evaluator (conceptual output)**
+
+* Requirements (K=2):
+
+  * f1) The director of *Inception*
+  * f2) The nationality of that director
+* Present:
+
+* f1 supported by `{p1}`
+* f2 supported by `{p2}`
+* Missing: none
+
+**Metrics**
+
+* Recall = 2/2 = **1.0**
+* Precision proxy = supporting documents `{p1, p2}` / total documents `3` = **0.67**
+* F1 = `2*(1.0*0.67)/(1.0+0.67)` ≈ **0.80**
+* nDCG (using scores for ordering): supporting documents at positions 1 and 2 ⇒ nDCG ≈ **1.0** (near-ideal order)
+
+---
+
+## Thresholds & alerting (recommended defaults)
+
+* **Recall**: alert at `< 1.0` for high-priority surfaces; or at `< 0.8–0.9` for lower priority.
+* **Precision** (proxy): watch long tails where precision < `0.3–0.4` ⇒ context bloat.
+* **F1**: use as a simple roll-up; alert if it drops by **Δ 0.15–0.25** release-over-release.
+* **nDCG**: if you use ranking, alert on material drops (e.g., **Δ 0.1**).
+
+You can scope alerts by `env`, `feature_flag`, or any metadata field (e.g., tenant, product area). See [Alerting](/alerts) for setup instructions.
+
+---
+
+## FAQ
+
+**Do I need labeled data?**
+No. The evaluator determines requirements (K) and support directly from your retrieval outputs.
+
+**Does recall depend on my final LLM's answer?**
+No. These are **retrieval-stage** metrics. (Answer-stage citation metrics are planned separately.)
+
+**How do I improve precision without hurting recall?**
+Tune rankers/rerankers, filter boilerplate, and trim redundant passages. nDCG helps validate ordering changes.
+
+**What if my `context` is `string[]` and not objects?**
+Totally fine. If you later add `{id, rank, score}`, you'll unlock deeper analytics like nDCG and per-passage views.
+
+---
+
+## See Also
+
+- [Quickstart](/quickstart)
+- [Context & Event Schema](/context-and-event-schema)
+- [Change Testing](/change-testing)
+- [Production Monitoring](/production-monitoring)
+- [Alerting](/alerts)

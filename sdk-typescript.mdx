@@ -1,0 +1,374 @@
+---
+title: TypeScript SDK
+description: TypeScript SDK reference for logging to Seer
+---
+
+The Seer TypeScript SDK provides a lightweight client for logging retrieval events from Node.js and browser environments.
+
+<Info title="Private Beta">
+Seer is currently in private beta. Email [ben@seersearch.com](mailto:ben@seersearch.com?subject=Seer%20Beta%20Access%20Request) to request access and receive SDK installation instructions.
+</Info>
+
+## Installation
+
+The SDK supports both CommonJS and ES modules:
+
+```bash
+npm install @seer/sdk
+
+# With OpenTelemetry support (optional)
+npm install @seer/sdk @opentelemetry/api
+```
+
+## Quick Start
+
+```typescript
+import { SeerClient } from '@seer/sdk';
+
+const client = new SeerClient();  // reads SEER_API_KEY from env
+
+// No await needed! Fire-and-forget by default
+client.log({
+  task: "How do I reset my password?",
+  context: [
+    { text: "To reset your password, go to Settings...", score: 0.89 }
+  ],
+});
+
+// Events auto-flush on process exit
+```
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SEER_API_KEY` | API key (required) | — |
+| `SEER_INGESTION_URL` | Ingestion endpoint | `https://api.seersearch.com/v1/log` |
+
+### Constructor Options
+
+```typescript
+const client = new SeerClient({
+  apiKey: "seer_live_...",           // or from SEER_API_KEY env
+  fireAndForget: true,               // async (default) or sync
+  maxQueueSize: 10_000,              // max events before dropping
+  flushInterval: 500,                // worker flush interval (ms)
+  timeout: 5000,                     // HTTP timeout (ms)
+});
+```
+
+---
+
+## SeerClient API
+
+### `log()`
+
+Log a retrieval event.
+
+```typescript
+await client.log({
+  // Required
+  task: string,                              // The user query
+  context: Array<string | Passage>,          // Retrieved passages
+
+  // Metadata
+  metadata?: Record<string, unknown>,        // Free-form metadata
+
+  // OpenTelemetry (auto-detected by default)
+  trace_id?: string,                         // OTEL trace ID (32 hex)
+  span_id?: string,                          // OTEL span ID (16 hex)
+  parent_span_id?: string,                   // OTEL parent span ID
+  span_name?: string,                        // Operation type
+  useOtelTrace?: boolean,                    // Auto-detect OTEL context (default: true)
+
+  // Multi-hop / Agentic
+  is_final_context?: boolean,                // Mark as final evidence
+  subquery?: string,                         // Decomposed sub-question
+
+  // Accuracy testing
+  ground_truth?: GroundTruth,                // For comparing against expected
+
+  // Other options
+  created_at?: string,                       // ISO8601 timestamp override
+  sample_rate?: number,                      // 0.0-1.0 sampling rate
+});
+```
+
+**Returns:**
+- `fireAndForget=true` (default): `void`, no await needed, event is queued
+- `fireAndForget=false`: `Promise<string | null>`, await to get `record_id`
+
+### `flush()`
+
+Wait for all queued events to be sent.
+
+```typescript
+await client.flush(timeout?: number);
+```
+
+### `stats()`
+
+Get client statistics.
+
+```typescript
+const stats = client.stats();
+console.log(`Sent: ${stats.eventsSent}, Failed: ${stats.eventsFailed}`);
+```
+
+Returns a `ClientStats` object:
+
+```typescript
+interface ClientStats {
+  eventsEnqueued: number;
+  eventsSent: number;
+  eventsDropped: number;
+  eventsFailed: number;
+  bytesSent: number;
+  lastError?: string;
+}
+```
+
+### `close()`
+
+Shutdown client gracefully (flushes remaining events).
+
+```typescript
+await client.close();
+```
+
+---
+
+## Context Format
+
+Passages can be simple strings or objects with metadata:
+
+```typescript
+// Simple strings
+const context = ["Passage one...", "Passage two..."];
+
+// Passage objects (recommended)
+const context = [
+  {
+    text: "The main content...",      // Required
+    score: 0.95,                       // Optional: retrieval score
+    id: "doc-123",                     // Optional: document ID
+    source: "wiki",                    // Optional: source name
+    metadata: { author: "..." },       // Optional: custom metadata
+  }
+];
+```
+
+---
+
+## Function Wrapper
+
+Use `wrapWithSeerTrace` to automatically log function calls:
+
+```typescript
+import { wrapWithSeerTrace, SeerClient } from '@seer/sdk';
+
+const client = new SeerClient();
+
+const tracedRetrieve = wrapWithSeerTrace(
+  async (query: string) => {
+    // Your retrieval logic
+    return [{ text: "Result...", score: 0.9 }];
+  },
+  {
+    taskArgIndex: 0,           // Index of the query argument
+    contextFromReturn: true,   // Return value is the context
+    metadata: { service: "help-bot" },
+    sampleRate: 0.10,
+    client,
+  }
+);
+
+// Automatically logged when called
+const results = await tracedRetrieve("How do I reset my password?");
+```
+
+### Wrapper Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `taskArgIndex` | `number` | Index of argument containing the query |
+| `contextArgIndex` | `number` | Index of argument containing context |
+| `contextFromReturn` | `boolean` | Use return value as context |
+| `metadata` | `Record<string, unknown>` | Static metadata to attach |
+| `sampleRate` | `number` | Sampling rate (0.0-1.0) |
+| `useOtelTrace` | `boolean` | Use OTEL trace context (default: true) |
+| `client` | `SeerClient` | Client instance |
+
+---
+
+## Fire-and-Forget vs Synchronous
+
+### Fire-and-Forget (Default)
+
+Events are queued and sent asynchronously in the background. No `await` needed, just call `log()` and continue.
+
+```typescript
+const client = new SeerClient();  // fireAndForget: true (default)
+
+// Just call and continue - no await!
+client.log({ task: "...", context: [...] });
+
+// Events are batched and sent automatically
+// Auto-flushes on process exit
+```
+
+**Note:** Auto-flush happens on normal exit. Call `flush()` explicitly before `process.exit()` or in worker threads.
+
+### Synchronous (Get Record ID)
+
+If you need the `record_id` back, use synchronous mode. The `log()` call returns a Promise that resolves to the record ID.
+
+```typescript
+const client = new SeerClient({ fireAndForget: false });
+
+// Await to get the record_id
+const recordId = await client.log({ task: "...", context: [...] });
+console.log(`Created: ${recordId}`);
+```
+
+<Tip title="When to use which mode?">
+- **Fire-and-forget (99% of cases):** For logging where you don't need the ID back. No performance impact on your application.
+- **Synchronous:** When you need to correlate the `record_id` with other systems or ensure the event was received before continuing.
+</Tip>
+
+---
+
+## OpenTelemetry Integration
+
+The SDK automatically captures OTEL trace context when available:
+
+```typescript
+import { trace } from '@opentelemetry/api';
+import { SeerClient } from '@seer/sdk';
+
+const tracer = trace.getTracer('my-app');
+const client = new SeerClient();
+
+await tracer.startActiveSpan('retrieval', async (span) => {
+  // trace_id, span_id, span_name are captured automatically
+  // No await needed in fire-and-forget mode
+  client.log({ task: "...", context: [...] });
+  span.end();
+});
+```
+
+### Manual Trace IDs
+
+```typescript
+// No await needed in fire-and-forget mode
+client.log({
+  task: "...",
+  context: [...],
+  trace_id: "0af7651916cd43dd8448eb211c80319c",
+  span_id: "b7ad6b7169203331",
+  span_name: "retrieval",
+  useOtelTrace: false,  // disable auto-detection
+});
+```
+
+### Span Name Patterns
+
+Span names are used for filtering in the UI:
+
+| Pattern | UI Color |
+|---------|----------|
+| `retrieval`, `retrieval_hop_N` | Blue |
+| `rerank`, `reranker` | Purple |
+| `llm_call`, `llm` | Amber |
+| `synthesis`, `answer` | Emerald |
+
+---
+
+## Ground Truth (Accuracy Testing)
+
+Include expected results for accuracy measurement:
+
+```typescript
+// No await needed in fire-and-forget mode
+client.log({
+  task: "What is machine learning?",
+  context: [
+    { text: "ML is a subset of AI...", id: "doc-ml-intro" },
+    { text: "Neural networks learn from data...", id: "doc-nn-basics" },
+  ],
+  ground_truth: {
+    // Document IDs that are relevant (matched against passage.id)
+    gold_doc_ids: ["doc-ml-intro", "doc-nn-basics"],
+    answer: "ML is a type of AI that learns from data",  // optional
+  },
+});
+```
+
+---
+
+## Convenience Function
+
+For simple cases, use the global `seerLog`:
+
+```typescript
+import { seerLog } from '@seer/sdk';
+
+// No await needed - fire-and-forget by default
+seerLog({
+  task: "Quick question",
+  context: [{ text: "Answer..." }],
+});
+```
+
+Creates a global `SeerClient` on first call (fire-and-forget mode).
+
+---
+
+## Error Handling
+
+The SDK is designed to be non-blocking and fail gracefully:
+
+- **Queue overflow:** Events are dropped (logged to console)
+- **Network errors:** Retried with exponential backoff, then dropped
+- **Invalid API key:** Warning logged, event sent (server rejects)
+
+Check `client.stats()` for failure counts.
+
+---
+
+## TypeScript Types
+
+The SDK exports all types for use in your application:
+
+```typescript
+import type {
+  Passage,
+  GroundTruth,
+  LogEvent,
+  LogOptions,
+  ClientStats,
+  SeerClientOptions,
+} from '@seer/sdk';
+```
+
+---
+
+## Examples
+
+- Basic usage
+- OpenTelemetry integration
+- Express middleware
+
+---
+
+## See Also
+
+- [Python SDK](/sdk-python)
+- [Logging Events](/logging)
+- [Metrics](/metrics)
+- [Context & Event Schema](/context-and-event-schema)
+- [Multi-Hop Retrieval](/multi-hop-retrieval)

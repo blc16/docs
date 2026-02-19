@@ -1,0 +1,326 @@
+---
+title: Python SDK
+description: Python SDK reference for logging to Seer
+---
+
+The Seer Python SDK provides a lightweight client for logging retrieval events.
+
+<Info title="Private Beta">
+Seer is currently in private beta. Email [ben@seersearch.com](mailto:ben@seersearch.com?subject=Seer%20Beta%20Access%20Request) to request access and receive SDK installation instructions.
+</Info>
+
+## Installation
+
+```bash
+pip install seer-sdk
+
+# With OpenTelemetry support (optional)
+pip install seer-sdk opentelemetry-api
+```
+
+## Quick Start
+
+```python
+from seer import SeerClient
+
+client = SeerClient()  # reads SEER_API_KEY from env
+
+client.log(
+    task="How do I reset my password?",
+    context=[
+        {"text": "To reset your password, go to Settings...", "score": 0.89}
+    ],
+)
+# Events auto-flush on process exit
+```
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SEER_API_KEY` | API key (required) | — |
+| `SEER_INGESTION_URL` | Ingestion endpoint | `https://api.seersearch.com/v1/log` |
+
+### Constructor Options
+
+```python
+client = SeerClient(
+    api_key="seer_live_...",           # or from SEER_API_KEY env
+    fire_and_forget=True,              # async (default) or sync
+    max_queue_size=10_000,             # max events before dropping
+    flush_interval=0.5,                # worker flush interval (seconds)
+    timeout=5.0,                       # HTTP timeout
+)
+```
+
+---
+
+## SeerClient API
+
+### `log()`
+
+Log a retrieval event.
+
+```python
+client.log(
+    # Required
+    task: str,                                # The user query
+    context: list[dict | str],                # Retrieved passages
+
+    # Metadata
+    metadata: dict | None = None,             # Free-form metadata
+
+    # OpenTelemetry (auto-detected by default)
+    trace_id: str | None = None,              # OTEL trace ID (32 hex)
+    span_id: str | None = None,               # OTEL span ID (16 hex)
+    parent_span_id: str | None = None,        # OTEL parent span ID
+    span_name: str | None = None,             # Operation type
+    use_otel_trace: bool = True,              # Auto-detect OTEL context
+
+    # Multi-hop / Agentic
+    is_final_context: bool = False,           # Mark as final evidence
+    subquery: str | None = None,              # Decomposed sub-question
+
+    # Accuracy testing
+    ground_truth: dict | None = None,         # For comparing against expected
+
+    # Other options
+    created_at: str | None = None,            # ISO8601 timestamp override
+    sample_rate: float | None = None,         # 0.0-1.0 sampling rate
+) -> str | None
+```
+
+**Returns:**
+- `fire_and_forget=True` (default): `None` (event queued async)
+- `fire_and_forget=False`: `record_id` string from API
+
+### `flush()`
+
+Wait for all queued events to be sent.
+
+```python
+client.flush(timeout: float | None = None)
+```
+
+### `stats()`
+
+Get client statistics.
+
+```python
+stats = client.stats()
+print(f"Sent: {stats.events_sent}, Failed: {stats.events_failed}")
+```
+
+Returns a `ClientStats` object:
+
+```python
+@dataclass
+class ClientStats:
+    events_enqueued: int = 0
+    events_sent: int = 0
+    events_dropped: int = 0
+    events_failed: int = 0
+    bytes_sent: int = 0
+    last_error: str | None = None
+```
+
+### `close()`
+
+Shutdown client gracefully (flushes remaining events).
+
+```python
+client.close()
+```
+
+---
+
+## Context Format
+
+Passages can be simple strings or objects with metadata:
+
+```python
+# Simple strings
+context = ["Passage one...", "Passage two..."]
+
+# Passage objects (recommended)
+context = [
+    {
+        "text": "The main content...",    # Required
+        "score": 0.95,                     # Optional: retrieval score
+        "id": "doc-123",                   # Optional: document ID
+        "source": "wiki",                  # Optional: source name
+        "metadata": {"author": "..."},     # Optional: custom metadata
+    }
+]
+```
+
+---
+
+## Decorator
+
+Use `@seer_trace` to automatically log function calls:
+
+```python
+from seer import seer_trace
+
+@seer_trace(
+    task_arg="query",           # which argument is the query
+    context_from_return=True,   # return value is the context
+    metadata={"service": "help-bot"},
+    sample_rate=0.10,
+)
+def retrieve(query: str) -> list[dict]:
+    return [{"text": "Result...", "score": 0.9}]
+
+# Automatically logged when called
+results = retrieve("How do I reset my password?")
+```
+
+### Decorator Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `task_arg` | `str` | Name of argument containing the query (default: `"query"`) |
+| `context_from_return` | `bool` | Use return value as context |
+| `context_arg` | `str` | Name of argument containing context (mutually exclusive with `context_from_return`) |
+| `metadata` | `dict` | Static metadata to attach |
+| `use_otel_trace` | `bool` | Auto-detect OTEL trace context (default: `True`) |
+| `client` | `SeerClient` | Client instance to use (default: global client) |
+
+---
+
+## Fire-and-Forget vs Synchronous
+
+### Fire-and-Forget (Default)
+
+Events are queued and sent asynchronously. `log()` returns immediately.
+
+```python
+client = SeerClient()  # fire_and_forget=True
+client.log(task="...", context=[...])  # returns None, queued
+# Auto-flushes on process exit
+```
+
+**Note:** Auto-flush via `atexit` happens on normal exit. Call `flush()` explicitly before `os._exit()` or in process pools.
+
+### Synchronous
+
+Events are sent immediately. `log()` blocks and returns `record_id`.
+
+```python
+client = SeerClient(fire_and_forget=False)
+record_id = client.log(task="...", context=[...])
+print(f"Created: {record_id}")
+```
+
+---
+
+## OpenTelemetry Integration
+
+The SDK automatically captures OTEL trace context when available:
+
+```python
+from opentelemetry import trace
+
+tracer = trace.get_tracer(__name__)
+
+with tracer.start_as_current_span("retrieval"):
+    # trace_id, span_id, span_name are captured automatically
+    client.log(task="...", context=[...])
+```
+
+### Manual Trace IDs
+
+```python
+client.log(
+    task="...",
+    context=[...],
+    trace_id="0af7651916cd43dd8448eb211c80319c",
+    span_id="b7ad6b7169203331",
+    span_name="retrieval",
+    use_otel_trace=False,  # disable auto-detection
+)
+```
+
+### Span Name Patterns
+
+Span names are used for filtering in the UI:
+
+| Pattern | UI Color |
+|---------|----------|
+| `retrieval`, `retrieval_hop_N` | Blue |
+| `rerank`, `reranker` | Purple |
+| `llm_call`, `llm` | Amber |
+| `synthesis`, `answer` | Emerald |
+
+---
+
+## Ground Truth (Accuracy Testing)
+
+Include expected results for accuracy measurement:
+
+```python
+client.log(
+    task="What is machine learning?",
+    context=[
+        {"text": "ML is a subset of AI...", "id": "doc-ml-intro"},
+        {"text": "Neural networks learn from data...", "id": "doc-nn-basics"},
+    ],
+    ground_truth={
+        # Document IDs that are relevant (matched against passage.id)
+        "gold_doc_ids": ["doc-ml-intro", "doc-nn-basics"],
+        "answer": "ML is a type of AI that learns from data",  # optional
+    },
+)
+```
+
+---
+
+## Convenience Function
+
+For simple cases, use the global `seer_log`:
+
+```python
+from seer import seer_log
+
+seer_log(
+    task="Quick question",
+    context=[{"text": "Answer..."}],
+)
+```
+
+Creates a global `SeerClient` on first call.
+
+---
+
+## Error Handling
+
+The SDK is designed to be non-blocking and fail gracefully:
+
+- **Queue overflow:** Events are dropped (logged to `seer.client` logger)
+- **Network errors:** Retried with exponential backoff, then dropped
+- **Invalid API key:** Warning logged, event sent (server rejects)
+
+Check `client.stats()` for failure counts.
+
+---
+
+## Examples
+
+- Basic usage
+- OpenTelemetry integration
+- Replay rollouts
+
+---
+
+## See Also
+
+- [TypeScript SDK](/sdk-typescript)
+- [Logging Events](/logging)
+- [Metrics](/metrics)
+- [Context & Event Schema](/context-and-event-schema)
+- [Multi-Hop Retrieval](/multi-hop-retrieval)

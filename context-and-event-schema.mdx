@@ -1,0 +1,375 @@
+---
+title: Context & Event Schema
+description: Data format for logging retrieval events
+---
+
+This page defines the format of the data you send to Seer when you call the logging API.
+
+## Context Format
+
+Seer supports 2 forms for `context`:
+
+- String array: `list[str]`, simple passage texts
+- Object array: `list[dict]`, passage objects with metadata
+
+When using object items, include at least the `text` field. Optional fields enable richer analytics.
+
+### Passage Object Fields
+
+```python
+{
+    "text": str,              # Required: the passage content
+    "id": str,                # Optional: your passage/document ID
+    "source": str,            # Optional: e.g., "wiki", "notion", "pdf:foo.pdf"
+    "score": float,           # Optional: retrieval/relevance score (0.0-1.0)
+    "metadata": dict,         # Optional: free-form attributes (collection, author, etc.)
+}
+```
+
+### Examples
+
+**Simple strings:**
+```python
+context = [
+    "Christopher Nolan directed Inception.",
+    "Nolan is British-American."
+]
+```
+
+**Passage objects:**
+```python
+context = [
+    {
+        "text": "Christopher Nolan directed Inception.",
+        "id": "doc-001",
+        "source": "wiki",
+        "score": 0.95,
+    },
+    {
+        "text": "Nolan is British-American.",
+        "id": "doc-002",
+        "source": "wiki",
+        "score": 0.89,
+    }
+]
+```
+
+### Limits & Guidelines
+
+| Limit | Value | Notes |
+|-------|-------|-------|
+| Max passages per request | 50 | Contact us if you need more |
+| Max chars per passage | 4,000 | ~1,000 tokens. Chunk longer documents. |
+| Recommended passage size | 200-1,000 chars | Typical chunk size for RAG |
+
+<Info title="Future: Larger Context Support">
+We're working on supporting larger context sizes with internal chunking and multi-evaluator calls. For now, keep individual passages under 4,000 characters.
+</Info>
+
+- If you have retrieval scores, include them. They enable nDCG and ranking metrics.
+- Use stable `id` values if you want to track passages across runs or use ground truth (to measure Seer's accuracy).
+
+---
+
+## Event Schema (API)
+
+An event describes a single retrieval to be evaluated.
+
+### Top-Level Fields
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `task` | `str` | ✓ | — | The user query |
+| `context` | `list[dict \| str]` | ✓ | — | Retrieved passages |
+| `metadata` | `dict` | | `{}` | Free-form metadata for filtering (`env`, `index_version`, etc.) |
+| `trace_id` | `str` | | auto | OTEL trace ID (32 hex chars), auto-detected |
+| `span_id` | `str` | | auto | OTEL span ID (16 hex chars), auto-detected |
+| `parent_span_id` | `str` | | auto | OTEL parent span ID (16 hex chars), auto-detected |
+| `span_name` | `str` | | auto | Operation type, auto-detected from OTEL span name |
+| `is_final_context` | `bool` | | `false` | Mark as final evidence passed to LLM/agent for answer synthesis |
+| `subquery` | `str` | | — | Decomposed sub-question for this retrieval hop |
+| `ground_truth` | `dict` | | — | For testing Seer's accuracy against labeled data |
+| `created_at` | `str` | | now | ISO8601 timestamp override |
+| `sample_rate` | `float` | | server default (~10%) | Sampling rate (0.0-1.0). `1.0` = always evaluate. See [Sampling](#sampling). |
+
+### Python SDK
+
+```python
+client.log(
+    # Required
+    task=str,                                # The user query
+    context=list[dict | str],                # Passage list
+
+    # Metadata (free-form filtering)
+    metadata=dict | None,                    # env, user_id, etc.
+
+    # OpenTelemetry (auto-detected by default)
+    trace_id=str | None,                     # Auto-detected from OTEL context
+    span_id=str | None,                      # Auto-detected from OTEL context
+    parent_span_id=str | None,               # OTEL parent span ID
+    span_name=str | None,                    # Auto-detected from OTEL span name
+    use_otel_trace=bool,                     # Enable auto-detection (default: True)
+
+    # Multi-hop / Agentic retrieval
+    is_final_context=bool,                   # Mark as final evidence for LLM/agent
+    subquery=str | None,                     # Decomposed sub-question for this hop
+
+    # Accuracy testing
+    ground_truth=dict | None,                # For comparing against expected results
+
+    # Other options
+    created_at=str | None,                   # ISO8601 timestamp override
+    sample_rate=float | None,                # 0.0-1.0 sampling rate (default: 0.1)
+)
+```
+
+<Info title="OTEL Auto-Detection">
+When running inside an OpenTelemetry span, the SDK automatically captures `trace_id`, `span_id`, `parent_span_id`, and `span_name`.
+
+To enable auto-detection, install with: `pip install seer-sdk[otel]`
+
+If you already have `opentelemetry-api` installed in your environment, auto-detection works automatically.
+</Info>
+
+### HTTP API
+
+```http
+POST /v1/log
+Authorization: Bearer seer_live_...
+Content-Type: application/json
+```
+
+```json
+{
+  "task": "Who directed Inception and what is their nationality?",
+  "context": [
+    {
+      "text": "Christopher Nolan directed Inception.",
+      "id": "doc-001",
+      "source": "wiki",
+      "score": 0.95
+    },
+    {
+      "text": "Nolan is British-American.",
+      "id": "doc-002",
+      "source": "wiki",
+      "score": 0.89
+    }
+  ],
+  "metadata": {
+    "env": "prod",
+    "index_version": "v1"
+  },
+  "span_name": "retrieval",
+  "sample_rate": 0.25
+}
+```
+
+### Response
+
+```json
+{
+  "record_id": "rec_01HQXYZ...",
+  "accepted": true
+}
+```
+
+---
+
+## Metadata
+
+The `metadata` field is a free-form dict for filtering and segmentation. All fields are optional.
+
+### Recommended Metadata Fields
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| `feature_flag` | **A/B test variant** (key for change testing) | `"retrieval-v1"`, `"reranker-enabled"` |
+| `env` | Environment tag | `"prod"`, `"staging"`, `"dev"` |
+| `user_id` | User identifier | `"user_456"` |
+| `model` | Embedding model used | `"text-embedding-3-small"` |
+| `index` | Vector DB index name | `"kb-prod"` |
+| `channel` | Request channel | `"web"`, `"api"`, `"slack"` |
+
+**Usage:**
+```python
+client.log(
+    task="...",
+    context=[...],
+    metadata={
+        "feature_flag": "retrieval-v2",  # for A/B testing
+        "env": "prod",
+        "index": "kb-prod",
+    },
+)
+```
+
+**Avoid:**
+- Extremely large nested objects
+- High-cardinality fields with millions of unique values
+- Sensitive PII that shouldn't be logged
+
+---
+
+## Sampling
+
+The `sample_rate` field controls what percentage of events get evaluated by Seer.
+
+### Defaults
+
+- **Default sample rate:** 10% (`0.1`)
+- **Override per-request:** Pass `sample_rate=0.5` for 50%, `sample_rate=1.0` for 100%
+
+### Single Records vs Multi-Span Traces
+
+For **single retrievals** (one `log()` call per query), each event is sampled independently based on `sample_rate`.
+
+For **multi-step workflows** (agentic RAG, query decomposition, parallel retrieval), the SDK auto-detects OTEL trace IDs and uses **trace-level sampling**:
+
+- The first span in a trace determines whether the entire trace is sampled
+- All subsequent spans with the same `trace_id` get the same sampling decision
+- This ensures you never see partial traces in your dashboard
+
+```python
+# All spans in this trace will be sampled together
+with tracer.start_as_current_span("multi_hop_query"):
+    client.log(task=query, context=hop1_results, span_name="retrieval_hop_1")
+    client.log(task=query, context=hop2_results, span_name="retrieval_hop_2")
+    # Both logs get the same sampling decision
+```
+
+For advanced multi-step patterns, see the [Multi-Hop Retrieval Guide](/multi-hop-retrieval).
+
+---
+
+## Multi-Hop & Agentic Retrieval
+
+For multi-step retrieval (decomposed queries, agent loops), use these fields:
+
+### `is_final_context`
+
+Mark the retrieval step whose context is the **final evidence** passed to the LLM or agent for answer synthesis:
+
+```python
+client.log(
+    task="What awards did the director of Inception win?",
+    context=final_context,
+    is_final_context=True,  # This context is what the LLM sees
+)
+```
+
+When `is_final_context=True`:
+- Trace-level metrics (Recall, F1) are derived from this span
+- The span is highlighted in the Seer UI as the "final evidence"
+- If no span is marked, Seer uses the last span by timestamp
+
+### `subquery`
+
+For decomposed queries, include the subquery that this specific retrieval hop is answering:
+
+```python
+# Original question requires multiple pieces of information
+original_query = "What awards did the director of Inception win?"
+
+# Hop 1: Find the director
+client.log(
+    task=original_query,                    # Keep original query
+    context=hop1_results,
+    subquery="Who directed Inception?",     # What this hop answers
+    span_name="retrieval_hop_1",
+)
+
+# Hop 2: Find awards for that director
+client.log(
+    task=original_query,                    # Same original query
+    context=hop2_results,
+    subquery="What awards has Christopher Nolan won?",  # Rewritten with entity
+    span_name="retrieval_hop_2",
+    is_final_context=True,
+)
+```
+
+When `subquery` is provided, Seer evaluates context against both:
+- The original `task`: is this hop contributing to the end goal?
+- The `subquery`: did this hop answer its specific question?
+
+[Learn more: Multi-Hop Retrieval Guide](/multi-hop-retrieval)
+
+---
+
+## Ground Truth (Testing Seer's Accuracy)
+
+For accuracy testing, you can include labeled data to validate Seer's evaluator performance:
+
+```python
+client.log(
+    task="What is machine learning?",
+    context=[
+        {"text": "ML is a subset of AI that learns from data.", "id": "doc-ml-intro"},
+        {"text": "Neural networks are a type of ML model.", "id": "doc-nn-basics"},
+        {"text": "The weather is nice today.", "id": "doc-weather"},  # irrelevant
+    ],
+    ground_truth={
+        # Document IDs that are relevant (matched against passage.id)
+        "gold_doc_ids": ["doc-ml-intro", "doc-nn-basics"],
+
+        # Expected answer (optional)
+        "answer": "Machine learning is a type of AI that learns from data",
+    },
+)
+```
+
+### What Seer Computes with Ground Truth
+
+When you provide `ground_truth`, Seer computes **two separate sets of metrics**:
+
+| Category | Metric | Description |
+|----------|--------|-------------|
+| **GT (Retrieval Quality)** | GT Recall | What % of gold docs did your retriever fetch? |
+| | GT Precision | What % of fetched docs are gold? |
+| **Evaluator Accuracy** | Evaluator Recall | What % of gold docs (in context) did Seer correctly identify? |
+| | Evaluator Precision | What % of Seer's citations are correct? |
+| | Evaluator Exact Match | Did Seer cite exactly the gold set? |
+
+<Tip title="Domain-Specific Evaluators">
+If Seer doesn't perform well on your domain, [contact us](mailto:ben@seersearch.com). We can create specialized evaluator models tuned for your content type.
+</Tip>
+
+**[Learn more → Accuracy Testing Guide](/accuracy-testing)**
+
+---
+
+## OpenTelemetry Fields
+
+For distributed tracing integration:
+
+| Field | Format | Auto-Detected | Description |
+|-------|--------|---------------|-------------|
+| `trace_id` | 32 hex chars | ✓ | Links spans across services |
+| `span_id` | 16 hex chars | ✓ | Unique span identifier |
+| `parent_span_id` | 16 hex chars | ✓ | Parent span for nesting |
+| `span_name` | string | ✓ | Operation type (e.g., `"retrieval"`, `"rerank"`) |
+
+The SDK auto-detects these from the current OTEL context when `use_otel_trace=True` (default).
+
+**Manual override:**
+```python
+client.log(
+    task="...",
+    context=[...],
+    trace_id="0af7651916cd43dd8448eb211c80319c",
+    span_id="b7ad6b7169203331",
+    span_name="retrieval",
+    use_otel_trace=False,  # disable auto-detection
+)
+```
+
+---
+
+## See Also
+
+- [Quickstart](/quickstart)
+- [Python SDK Reference](/sdk-python)
+- [Metrics Definitions](/metrics)
+- [Multi-Hop Retrieval](/multi-hop-retrieval)
+- [Accuracy Testing](/accuracy-testing)

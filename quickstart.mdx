@@ -1,80 +1,179 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Send your first log to Seer in 5 minutes
 ---
 
-## Get started in three steps
+> Make your first Seer log and measure retrieval quality from unlabeled traffic.
 
-Get your documentation site running locally and make your first customization.
+<Info title="Beta Access Required">
+Seer is in private beta. Email [ben@seersearch.com](mailto:ben@seersearch.com?subject=Seer%20Beta%20Access%20Request) to request an API key.
+</Info>
 
-### Step 1: Set up your local environment
+<Tip>
+Prefer zero-friction integration? Use the [`@seer_trace` decorator](/sdk-python#decorator) (Python) or [`wrapWithSeerTrace`](/sdk-typescript#function-wrapper) (TypeScript) to wrap your retrieval function and auto-log query+context.
+</Tip>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+## Quick Start
 
-### Step 2: Deploy your changes
+<Tabs>
+  <Tab title="Python">
+    <Steps>
+      <Step title="Install the Seer SDK">
+        ```bash
+        pip install seer-sdk
+        ```
+      </Step>
+      <Step title="Set your API key">
+        Get an API key from the Seer Console and export it:
+        ```bash
+        export SEER_API_KEY="seer_live_your_key_here"
+        ```
+      </Step>
+      <Step title="Create quickstart.py">
+        ```python
+        from seer import SeerClient
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+        client = SeerClient()  # reads SEER_API_KEY from env
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+        # Your retrieval step
+        def retrieve(query: str) -> list[dict]:
+            # Replace with your real retriever
+            return [
+                {"text": "Christopher Nolan directed Inception.", "score": 0.95},
+                {"text": "Nolan is British-American.", "score": 0.89}
+            ]
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+        query = "Who directed Inception and what is their nationality?"
+        context = retrieve(query)
 
-### Step 3: Go live
+        client.log(
+            task=query,                           # the user query
+            context=context,                      # list of passage dicts
+            metadata={
+                "env": "prod",                    # environment tag
+                "feature_flag": "retrieval-v1",   # for A/B testing
+            },
+        )
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+        print("Logged to Seer!")
+        # Events are auto-flushed when the process exits
+        ```
+      </Step>
+      <Step title="Run it">
+        ```bash
+        python quickstart.py
+        ```
+      </Step>
+    </Steps>
+  </Tab>
 
-## Next steps
+  <Tab title="TypeScript">
+    <Steps>
+      <Step title="Install the Seer SDK">
+        ```bash
+        npm install @seer/sdk
+        ```
+      </Step>
+      <Step title="Set your API key">
+        Get an API key from the Seer Console and export it:
+        ```bash
+        export SEER_API_KEY="seer_live_your_key_here"
+        ```
+      </Step>
+      <Step title="Create quickstart.ts">
+        ```typescript
+        import { SeerClient } from '@seer/sdk';
 
-Now that you have your docs running, explore these key features:
+        const client = new SeerClient();  // reads SEER_API_KEY from env
 
-<CardGroup cols={2}>
+        // Your retrieval step
+        function retrieve(query: string) {
+            // Replace with your real retriever
+            return [
+                { text: "Christopher Nolan directed Inception.", score: 0.95 },
+                { text: "Nolan is British-American.", score: 0.89 }
+            ];
+        }
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+        const query = "Who directed Inception and what is their nationality?";
+        const context = retrieve(query);
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+        // No await needed! Fire-and-forget by default
+        client.log({
+            task: query,                           // the user query
+            context: context,                      // list of passage objects
+            metadata: {
+                env: "prod",                       // environment tag
+                feature_flag: "retrieval-v1",      // for A/B testing
+            },
+        });
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+        console.log("Logged to Seer!");
+        // Events are auto-flushed when the process exits
+        ```
+      </Step>
+      <Step title="Run it">
+        ```bash
+        npx ts-node quickstart.ts
+        ```
+      </Step>
+    </Steps>
+  </Tab>
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+  <Tab title="cURL">
+    <Steps>
+      <Step title="Set your API key">
+        Get an API key from the Seer Console:
+        ```bash
+        export SEER_API_KEY="seer_live_your_key_here"
+        ```
+      </Step>
+      <Step title="Send a log">
+        ```bash
+        curl -X POST "https://api.seersearch.com/v1/log" \
+          -H "Authorization: Bearer $SEER_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "task": "Who directed Inception and what is their nationality?",
+            "context": [
+              {"text": "Christopher Nolan directed Inception.", "score": 0.95},
+              {"text": "Nolan is British-American.", "score": 0.89}
+            ],
+            "metadata": {
+              "env": "prod",
+              "feature_flag": "retrieval-v1"
+            }
+          }'
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
 
-</CardGroup>
+---
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## What Happens Next
+
+As logs arrive, Seer evaluates each retrieval and computes Recall, Precision, F1, and nDCG, all without labeled data. See [Metrics](/metrics) for full definitions and worked examples.
+
+<Info title="Sampling">
+By default, Seer evaluates ~10% of events (`sample_rate` defaults to server-side 10%). Set `sample_rate=1.0` in your `log()` call to evaluate everything during testing. See [Production Monitoring](/production-monitoring#sampling-guidance) for recommended rates.
+</Info>
+
+Use the Seer dashboard to:
+- Compare variants (change testing): filter by `feature_flag` to see A/B impacts.
+- Monitor production: filter by `env` or any `metadata` field.
+
+<Tip title="Multi-step or agentic workflows?">
+If your app uses multiple retrieval steps (query decomposition, agent loops, parallel sources), the SDK auto-detects OTEL trace IDs to group related spans. See [Multi-Hop Retrieval](/multi-hop-retrieval) for patterns.
+</Tip>
+
+---
+
+## Next Steps
+
+- [Logging Events](/logging): Decorator/wrapper patterns, fire-and-forget vs sync, OTEL integration
+- [Metrics](/metrics): What Seer computes from your logs
+- [Change Testing](/change-testing): A/B test retrieval changes
+- [Production Monitoring](/production-monitoring): Set up ongoing monitoring
+- SDK Reference: [Python](/sdk-python) | [TypeScript](/sdk-typescript)

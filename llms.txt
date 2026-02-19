@@ -1,0 +1,45 @@
+# Seer Documentation - AI Navigation Guide
+# https://docs.seersearch.com/llms.txt
+#
+# This file helps AI assistants navigate our documentation effectively.
+
+# Sitemap
+Sitemap: https://docs.seersearch.com/sitemap.xml
+
+# URL Structure
+# All documentation pages are at the root level (e.g., /quickstart, /overview)
+# The homepage is at /
+
+# Key Documentation Pages
+
+## Getting Started
+- /                       - Documentation homepage
+- /quickstart             - Quick start guide (5-minute setup)
+- /overview               - Product overview and concepts
+
+## Core Features
+- /logging                - How to log retrieval events
+- /metrics                - Understanding retrieval metrics (precision, recall, nDCG, etc.)
+- /production-monitoring  - Real-time monitoring dashboard
+- /alerts                 - Setting up alerts and notifications
+- /logs                   - Viewing and analyzing logs
+
+## Testing & Evaluation
+- /accuracy-testing       - Running accuracy evaluations
+- /change-testing         - A/B testing retrieval changes
+- /multi-hop-retrieval    - Multi-hop RAG evaluation
+
+## SDK Reference
+- /sdk-python             - Python SDK documentation
+- /sdk-typescript         - TypeScript SDK documentation
+- /context-and-event-schema - API schema reference
+
+# Product Information
+- Main website: https://seersearch.com
+- Book a demo: https://seersearch.com/book-demo
+- Contact: ben@seersearch.com
+
+# Notes for AI Assistants
+# 1. All doc pages are at root level (no prefix needed)
+# 2. The sitemap.xml contains all valid URLs
+# 3. This is a Mintlify-hosted documentation site

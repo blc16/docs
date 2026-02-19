@@ -1,0 +1,404 @@
+---
+title: Logging Events
+description: Methods for sending retrieval events to Seer
+---
+
+Seer accepts one event per retrieval with a task (query) and a context array. You can log events two ways:
+
+1. **Direct client**: Call `client.log(...)` where you construct the payload.
+2. **Decorator**: Wrap your retrieval function to auto-capture inputs/outputs.
+
+> New to the context format? See [Context & Event Schema](/context-and-event-schema) for the exact shapes.
+
+---
+
+## Install & Initialize
+
+<Tabs>
+  <Tab title="Python">
+    ```bash
+    pip install seer-sdk
+    export SEER_API_KEY="seer_live_your_key_here"
+    ```
+
+    ```python
+    from seer import SeerClient
+
+    client = SeerClient()  # reads SEER_API_KEY from env
+    ```
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```bash
+    npm install @seer/sdk
+    export SEER_API_KEY="seer_live_your_key_here"
+    ```
+
+    ```typescript
+    import { SeerClient } from '@seer/sdk';
+
+    const client = new SeerClient();  // reads SEER_API_KEY from env
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Option A: Direct Logging (`client.log`)
+
+Use this when you already have the query + context assembled.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    query = "Who directed Inception and what is their nationality?"
+    context = [
+        {"text": "Christopher Nolan directed Inception.", "id": "p-001", "score": 0.95},
+        {"text": "Nolan is British-American.", "id": "p-002", "score": 0.89},
+    ]
+
+    client.log(
+        task=query,                              # the user query
+        context=context,                         # list of passage dicts or strings
+        metadata={
+            "env": "prod",                       # environment tag
+            "feature_flag": "retrieval-v1",      # for A/B testing
+        },
+        sample_rate=0.1,                         # 10% sampling for monitoring
+    )
+    # Events are sent automatically in the background
+    ```
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```typescript
+    const query = "Who directed Inception and what is their nationality?";
+    const context = [
+        { text: "Christopher Nolan directed Inception.", id: "p-001", score: 0.95 },
+        { text: "Nolan is British-American.", id: "p-002", score: 0.89 },
+    ];
+
+    client.log({
+        task: query,                              // the user query
+        context: context,                         // list of passage objects or strings
+        metadata: {
+            env: "prod",                          // environment tag
+            feature_flag: "retrieval-v1",         // for A/B testing
+        },
+        sample_rate: 0.1,                         // 10% sampling for monitoring
+    });
+    // Events are sent automatically in the background
+    ```
+  </Tab>
+</Tabs>
+
+**Notes:**
+
+- `context` must be either `list[str]` / `string[]` or `list[dict]` / `Passage[]`. If using dicts/objects, include `text`.
+  Full shape + examples: [Context & Event Schema](/context-and-event-schema).
+- `metadata` is free-form. Include anything you want to filter by later.
+- `sample_rate` controls what % of events get evaluated (for cost management).
+
+---
+
+## Option B: Decorator / Wrapper
+
+The decorator (Python) or wrapper (TypeScript) eliminates boilerplate by mapping your function's arguments/return to Seer's event fields.
+
+### Pattern 1: Context from Return Value
+
+For retrieval functions where the return value is the context:
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    from seer import seer_trace
+
+    @seer_trace(
+        task_arg="query",           # which argument is the query
+        context_from_return=True,   # use return value as context
+    )
+    def retrieve(query: str) -> list[dict]:
+        # Your retriever returns passage dicts
+        return [
+            {"text": "Christopher Nolan directed Inception.", "score": 0.95},
+            {"text": "Nolan is British-American.", "score": 0.89}
+        ]
+
+    # Decorator logs: task=query, context=return_value
+    results = retrieve("Who directed Inception?")
+    ```
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```typescript
+    import { wrapWithSeerTrace, SeerClient } from '@seer/sdk';
+
+    const client = new SeerClient();
+
+    const retrieve = wrapWithSeerTrace(
+        async (query: string) => {
+            // Your retriever returns passage objects
+            return [
+                { text: "Christopher Nolan directed Inception.", score: 0.95 },
+                { text: "Nolan is British-American.", score: 0.89 }
+            ];
+        },
+        {
+            taskArgIndex: 0,           // index of the query argument
+            contextFromReturn: true,   // use return value as context
+            client,
+        }
+    );
+
+    // Wrapper logs: task=query, context=return_value
+    const results = await retrieve("Who directed Inception?");
+    ```
+  </Tab>
+</Tabs>
+
+The return value can be `list[dict]` / `Passage[]` (must have `text` key) or `list[str]` / `string[]` (auto-converted).
+
+### Pattern 2: Context from Input Argument
+
+For processing functions where context is an input argument (not the return):
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    @seer_trace(
+        task_arg="query",           # which argument is the query
+        context_arg="passages",     # which argument is the context
+    )
+    def generate_answer(query: str, passages: list[dict]) -> str:
+        # Function receives context as input, returns something else
+        return "Christopher Nolan, a British-American filmmaker"
+
+    # Decorator logs: task=query, context=passages
+    answer = generate_answer("Who directed Inception?", retrieved_passages)
+    ```
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```typescript
+    const generateAnswer = wrapWithSeerTrace(
+        async (query: string, passages: Passage[]) => {
+            // Function receives context as input, returns something else
+            return "Christopher Nolan, a British-American filmmaker";
+        },
+        {
+            taskArgIndex: 0,           // index of the query argument
+            contextArgIndex: 1,        // index of the context argument
+            client,
+        }
+    );
+
+    // Wrapper logs: task=query, context=passages
+    const answer = await generateAnswer("Who directed Inception?", retrievedPassages);
+    ```
+  </Tab>
+</Tabs>
+
+### Options
+
+<Tabs>
+  <Tab title="Python">
+    | Parameter | Type | Description |
+    |-----------|------|-------------|
+    | `task_arg` | `str` | Name of argument containing the query (default: `"query"`) |
+    | `context_from_return` | `bool` | If `True`, use the return value as context |
+    | `context_arg` | `str` | Name of argument containing context |
+    | `metadata` | `dict` | Static metadata to attach to every log |
+    | `use_otel_trace` | `bool` | Auto-detect OTEL trace context (default: `True`) |
+  </Tab>
+
+  <Tab title="TypeScript">
+    | Parameter | Type | Description |
+    |-----------|------|-------------|
+    | `taskArgIndex` | `number` | Index of argument containing the query (default: `0`) |
+    | `contextFromReturn` | `boolean` | If `true`, use the return value as context |
+    | `contextArgIndex` | `number` | Index of argument containing context |
+    | `metadata` | `Record<string, unknown>` | Static metadata to attach to every log |
+    | `useOtelTrace` | `boolean` | Auto-detect OTEL trace context (default: `true`) |
+    | `sampleRate` | `number` | Sampling rate 0.0-1.0 |
+    | `client` | `SeerClient` | Client instance to use |
+  </Tab>
+</Tabs>
+
+<Info title="Choose One">
+Use either `context_from_return=True` / `contextFromReturn: true` or `context_arg` / `contextArgIndex`. They are mutually exclusive.
+</Info>
+
+### Adding Metadata
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    from seer import seer_trace
+
+    @seer_trace(
+        task_arg="query",
+        context_from_return=True,
+        metadata={"service": "help-bot"},  # static metadata
+    )
+    def retrieve(query: str) -> list[dict]:
+        return [{"text": "...", "score": 0.9}]
+    ```
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```typescript
+    const retrieve = wrapWithSeerTrace(
+        async (query: string) => {
+            return [{ text: "...", score: 0.9 }];
+        },
+        {
+            taskArgIndex: 0,
+            contextFromReturn: true,
+            metadata: { service: "help-bot" },  // static metadata
+            client,
+        }
+    );
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Choosing Between Client vs Decorator
+
+| Use Case | Recommended |
+|----------|-------------|
+| Full control at each call site | `client.log()` |
+| Cleanly encapsulated retrieval function | `@seer_trace` |
+| Multiple retrieval functions | `@seer_trace` on each |
+| Custom logging pipeline | `client.log()` |
+
+---
+
+## Fire-and-Forget vs Synchronous
+
+By default, the SDK uses fire-and-forget mode. Events are queued and sent asynchronously in the background.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    # Fire-and-forget (default) — log() returns immediately
+    client = SeerClient()  # fire_and_forget=True by default
+    client.log(task="...", context=[...])  # returns None, queued async
+    # Events auto-flush on process exit
+
+    # Synchronous — log() blocks and returns record_id
+    client = SeerClient(fire_and_forget=False)
+    record_id = client.log(task="...", context=[...])  # returns record_id
+    print(f"Created record: {record_id}")
+    ```
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```typescript
+    // Fire-and-forget (default) — no await needed!
+    const client = new SeerClient();  // fireAndForget: true by default
+    client.log({ task: "...", context: [...] });  // returns void, queued async
+    // Events auto-flush on process exit
+
+    // Synchronous — await to get record_id
+    const syncClient = new SeerClient({ fireAndForget: false });
+    const recordId = await syncClient.log({ task: "...", context: [...] });
+    console.log(`Created record: ${recordId}`);
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## OpenTelemetry Integration
+
+The SDK automatically captures OTEL trace context when available:
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    from opentelemetry import trace
+
+    tracer = trace.get_tracer(__name__)
+
+    with tracer.start_as_current_span("retrieval"):
+        # trace_id, span_id, parent_span_id, span_name captured automatically
+        client.log(task="...", context=[...])
+    ```
+
+    <Tip title="Enable OTEL Auto-Detection">
+    Install with `pip install seer-sdk[otel]` to enable auto-detection.
+    If you already have `opentelemetry-api` in your environment, it works automatically.
+    </Tip>
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```typescript
+    import { trace } from '@opentelemetry/api';
+
+    const tracer = trace.getTracer('my-app');
+
+    await tracer.startActiveSpan('retrieval', async (span) => {
+        // trace_id, span_id, parent_span_id, span_name captured automatically
+        // No await needed in fire-and-forget mode
+        client.log({ task: "...", context: [...] });
+        span.end();
+    });
+    ```
+
+    <Tip title="Enable OTEL Auto-Detection">
+    Install with `npm install @seer/sdk @opentelemetry/api` to enable auto-detection.
+    </Tip>
+  </Tab>
+</Tabs>
+
+To disable auto-detection or provide manual IDs:
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    # Disable OTEL auto-detection
+    client.log(task="...", context=[...], use_otel_trace=False)
+
+    # Provide manual trace IDs
+    client.log(
+        task="...",
+        context=[...],
+        trace_id="0af7651916cd43dd8448eb211c80319c",
+        span_id="b7ad6b7169203331",
+    )
+    ```
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```typescript
+    // Disable OTEL auto-detection (no await needed)
+    client.log({ task: "...", context: [...], useOtelTrace: false });
+
+    // Provide manual trace IDs (no await needed)
+    client.log({
+        task: "...",
+        context: [...],
+        trace_id: "0af7651916cd43dd8448eb211c80319c",
+        span_id: "b7ad6b7169203331",
+    });
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## What Happens After Logging
+
+Once logs arrive, Seer evaluates each retrieval and computes Recall, Precision, F1, and nDCG, all without labeled data. See [Metrics](/metrics) for full definitions and worked examples.
+
+---
+
+## Next Steps
+
+- SDK Reference: [Python](/sdk-python) | [TypeScript](/sdk-typescript)
+- [Metrics](/metrics)
+- [Change Testing (A/B)](/change-testing)
+- [Production Monitoring](/production-monitoring)
