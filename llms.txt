@@ -1,45 +1,63 @@
 # Seer Documentation - AI Navigation Guide
 # https://docs.seersearch.com/llms.txt
 #
-# This file helps AI assistants navigate our documentation effectively.
+# Seer helps teams evaluate and monitor retrieval quality for AI systems.
+# It logs retrieval traces, computes quality metrics, supports change/accuracy
+# testing workflows, and powers alerts and production monitoring.
 
-# Sitemap
+# Machine-readable indexes
 Sitemap: https://docs.seersearch.com/sitemap.xml
+llms-full: https://docs.seersearch.com/llms-full.txt
 
-# URL Structure
-# All documentation pages are at the root level (e.g., /quickstart, /overview)
-# The homepage is at /
-
-# Key Documentation Pages
-
-## Getting Started
-- /                       - Documentation homepage
-- /quickstart             - Quick start guide (5-minute setup)
-- /overview               - Product overview and concepts
-
-## Core Features
-- /logging                - How to log retrieval events
-- /metrics                - Understanding retrieval metrics (precision, recall, nDCG, etc.)
-- /production-monitoring  - Real-time monitoring dashboard
-- /alerts                 - Setting up alerts and notifications
-- /logs                   - Viewing and analyzing logs
-
-## Testing & Evaluation
-- /accuracy-testing       - Running accuracy evaluations
-- /change-testing         - A/B testing retrieval changes
-- /multi-hop-retrieval    - Multi-hop RAG evaluation
-
-## SDK Reference
-- /sdk-python             - Python SDK documentation
-- /sdk-typescript         - TypeScript SDK documentation
-- /context-and-event-schema - API schema reference
-
-# Product Information
+# Product information
 - Main website: https://seersearch.com
 - Book a demo: https://seersearch.com/book-demo
 - Contact: ben@seersearch.com
 
-# Notes for AI Assistants
-# 1. All doc pages are at root level (no prefix needed)
-# 2. The sitemap.xml contains all valid URLs
-# 3. This is a Mintlify-hosted documentation site
+# Key concepts
+- Retrieval logging: capture query, retrieved chunks, rank/order, and metadata.
+- Evaluation metrics: precision@k, recall@k, nDCG, hit rate, and related ranking signals.
+- Change testing: compare retrieval quality between model/retriever/index variants.
+- Production monitoring: watch quality, latency, and cost with configurable alerts.
+
+# Quick example
+# SDKs are available in private beta. You can always test ingestion with cURL:
+#
+# curl -X POST "https://api.seersearch.com/v1/log" \
+#   -H "Authorization: Bearer $SEER_API_KEY" \
+#   -H "Content-Type: application/json" \
+#   -d '{"query":"What is RAG?","retrieved":[{"text":"RAG combines retrieval and generation."}]}'
+
+# URL structure
+# All documentation pages are at the root level (e.g., /quickstart, /overview).
+# The docs homepage is /introduction (root / redirects there).
+
+# Key documentation pages
+
+## Getting started
+- /introduction            - Documentation homepage
+- /overview                - Product overview and core concepts
+- /quickstart              - 5-minute setup with Python, TypeScript, and cURL
+- /logging                 - Logging APIs and SDK patterns
+
+## Core platform
+- /metrics                 - Retrieval metrics and interpretation
+- /production-monitoring   - Monitoring dashboards and operational guidance
+- /alerts                  - Alert policies, defaults, and webhook payloads
+- /logs                    - Traces/records views for debugging and analysis
+
+## Testing and evaluation
+- /accuracy-testing        - Ground-truth evaluations and scoring workflows
+- /change-testing          - A/B testing retrieval system changes
+- /multi-hop-retrieval     - Multi-hop retrieval evaluation guidance
+
+## Schemas and SDKs
+- /context-and-event-schema - Event format, limits, and API schema details
+- /sdk-python              - Python SDK reference (private beta)
+- /sdk-typescript          - TypeScript SDK reference (private beta)
+- /mcp-integration         - MCP integration status and roadmap
+
+# Notes for AI assistants
+# 1. Prefer /introduction for entrypoint context.
+# 2. Use llms-full.txt for full-content retrieval across all pages.
+# 3. Use sitemap.xml to discover canonical URL coverage.

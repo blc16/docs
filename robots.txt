@@ -1,0 +1,8 @@
+User-agent: *
+Disallow: /cdn-cgi/
+
+Sitemap: https://docs.seersearch.com/sitemap.xml
+
+# LLM Navigation
+# https://docs.seersearch.com/llms.txt
+# https://docs.seersearch.com/llms-full.txt
